@@ -33,7 +33,7 @@
 ## ---- 0. Configuration (edit only this block) --------------------------------
 rm(list = ls())
 set.seed(123)
-
+setwd("D:/LJH/research/本科生科研/FAERS/2-time/") 
 suppressPackageStartupMessages({
   library(tidyverse)
   library(GEOquery)
@@ -46,13 +46,18 @@ suppressPackageStartupMessages({
 options(stringsAsFactors = FALSE)
 enableWGCNAThreads()          # use allowWGCNAThreads() if running inside RStudio
 
-DATA_DIR <- "data"
-FIG_DIR  <- "figures"
-RES_DIR  <- "results"
-for (d in c(FIG_DIR, RES_DIR)) if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+# ---- paths (local run) -------------------------------------------------------
+# Machine-specific paths so the script runs as-is on your machine. Before
+# pushing to the public repo, move the two inputs into data/ and switch to
+# relative paths (data/GSE46955_series_matrix.txt.gz, data/Mye_all_markers.csv).
+setwd("D:/LJH/research/本科生科研/FAERS/2-time/")
 
-GEO_FILE    <- file.path(DATA_DIR, "GSE46955_series_matrix.txt.gz")
-MARKER_FILE <- file.path(DATA_DIR, "Mye_all_markers.csv")
+GEO_FILE    <- "GSE46955_series_matrix.txt.gz"   # in the working directory
+MARKER_FILE <- "../Mye_all_markers (1).csv"      # one level up
+
+FIG_DIR <- "figures"
+RES_DIR <- "results"
+for (d in c(FIG_DIR, RES_DIR)) if (!dir.exists(d)) dir.create(d, recursive = TRUE)
 
 # --- analysis parameters ---
 N_TOP_MAD        <- 5000          # most-variable protein-coding genes for WGCNA
@@ -65,7 +70,9 @@ MERGE_CUT_HEIGHT <- 0.25
 # connectivity reduced to low single digits). pickSoftThreshold output is
 # printed below so the choice can be verified against the data.
 SOFT_POWER         <- 16
-MODULE_OF_INTEREST <- "black"     # module carried forward to cytoHubba
+MODULES_OF_INTEREST <- c("pink", "greenyellow", "black")  # modules carried forward to cytoHubba
+# (pink contains the IFN-responsive genes incl. IFITM3; black is the antigen-
+#  presentation/monocyte program; both, with greenyellow, supply hub candidates)
 
 # Single-cell marker selection thresholds
 MARKER_PADJ  <- 0.05
@@ -269,19 +276,20 @@ for (col in unique(moduleColors))
   writeLines(names(moduleColors)[moduleColors == col],
              file.path(RES_DIR, sprintf("module_%s_genes.txt", col)))
 
-# TOM-based edge/node files for the module carried forward to cytoHubba. This
-# documents exactly how the network imported into Cytoscape was generated.
-moi_genes <- names(moduleColors)[moduleColors == MODULE_OF_INTEREST]
-TOM <- TOMsimilarityFromExpr(datExpr[, moi_genes], power = SOFT_POWER,
-                             networkType = TOM_TYPE, TOMType = TOM_TYPE)
-dimnames(TOM) <- list(moi_genes, moi_genes)
-exportNetworkToCytoscape(
-  TOM, threshold = 0.02, nodeNames = moi_genes,
-  edgeFile = file.path(RES_DIR, sprintf("cytoscape_edges_%s.txt", MODULE_OF_INTEREST)),
-  nodeFile = file.path(RES_DIR, sprintf("cytoscape_nodes_%s.txt", MODULE_OF_INTEREST)))
-# Hub genes were then ranked in Cytoscape/cytoHubba as the intersection of the
-# MCC, MNC, EPC and Degree methods (see Methods); cytoHubba is used here for
-# candidate-gene prioritisation, not as evidence of mechanistic importance.
+# TOM-based edge/node files for each module carried forward to cytoHubba. This
+# documents exactly how the networks imported into Cytoscape were generated.
+# cytoHubba is then used for candidate-gene prioritisation (intersection of the
+# MCC, MNC, EPC and Degree methods); it is not evidence of mechanistic importance.
+for (mod in MODULES_OF_INTEREST) {
+  mod_genes <- names(moduleColors)[moduleColors == mod]
+  tom <- TOMsimilarityFromExpr(datExpr[, mod_genes], power = SOFT_POWER,
+                               networkType = TOM_TYPE, TOMType = TOM_TYPE)
+  dimnames(tom) <- list(mod_genes, mod_genes)
+  exportNetworkToCytoscape(
+    tom, threshold = 0.02, nodeNames = mod_genes,
+    edgeFile = file.path(RES_DIR, sprintf("cytoscape_edges_%s.txt", mod)),
+    nodeFile = file.path(RES_DIR, sprintf("cytoscape_nodes_%s.txt", mod)))
+}
 
 
 ## ---- 9. Module functional enrichment (GO BP + KEGG) -------------------------
@@ -299,7 +307,8 @@ enrich_module <- function(genes, tag) {
     write.csv(as.data.frame(kg),
               file.path(RES_DIR, sprintf("enrichment_%s_KEGG.csv", tag)), row.names = FALSE)
 }
-enrich_module(moi_genes, MODULE_OF_INTEREST)
+for (mod in MODULES_OF_INTEREST)
+  enrich_module(names(moduleColors)[moduleColors == mod], mod)
 
 
 ## ---- Optional: module preservation in an independent cohort -----------------
@@ -308,7 +317,7 @@ enrich_module(moi_genes, MODULE_OF_INTEREST)
 # overlapping symbols. Set RUN_PRESERVATION <- TRUE and supply the file.
 RUN_PRESERVATION <- FALSE
 if (RUN_PRESERVATION) {
-  ref_expr <- readRDS(file.path(DATA_DIR, "REPLACE_reference_cohort.rds"))  # genes x samples
+  ref_expr <- readRDS("reference_cohort_expr.rds")  # genes x samples (place in the working dir)
   common   <- intersect(colnames(datExpr), rownames(ref_expr))
   multiExpr <- list(GSE46955  = list(data = datExpr[, common]),
                     Reference = list(data = as.data.frame(t(ref_expr[common, ]))))
